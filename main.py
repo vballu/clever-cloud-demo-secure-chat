@@ -5,14 +5,27 @@ from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from authlib.integrations.flask_client import OAuth
 from functools import wraps
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+# Clever Cloud load balancers terminate HTTPS: trust their X-Forwarded-* headers
+# so that redirect URIs are built with https.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# No default secret: the application refuses to start without one.
+app.secret_key = os.environ.get('SECRET_KEY')
+if not app.secret_key:
+    raise RuntimeError('SECRET_KEY is not set: generate one with `openssl rand -hex 32`')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('POSTGRESQL_ADDON_URI', 'postgresql://localhost/minichat')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+# Secure cookies by default (HTTPS); set SESSION_COOKIE_SECURE=false for a local run over HTTP.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() != 'false'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+MAX_MESSAGE_LENGTH = 2000
 
 db = SQLAlchemy(app)
 oauth = OAuth(app)
@@ -86,9 +99,14 @@ def get_messages():
 @app.route('/messages', methods=['POST'])
 @login_required
 def post_message():
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    contenu = str(data.get('contenu', '')).strip()
+    if not contenu:
+        return jsonify({'error': 'Message vide'}), 400
+    if len(contenu) > MAX_MESSAGE_LENGTH:
+        return jsonify({'error': f'Message trop long (maximum {MAX_MESSAGE_LENGTH} caractères)'}), 400
     user = session['user']
-    message = Message(pseudo=user['username'], contenu=data['contenu'])
+    message = Message(pseudo=user['username'], contenu=contenu)
     db.session.add(message)
     db.session.commit()
     return jsonify({'status': 'ok'})
