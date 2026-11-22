@@ -25,11 +25,24 @@ clever env set KEYCLOAK_REALM <realm>
 clever env set KEYCLOAK_CLIENT_ID <client-id>
 clever env set KEYCLOAK_CLIENT_SECRET <client-secret>
 clever env set SECRET_KEY "$(openssl rand -hex 32)"
-clever env set CC_RUN_COMMAND "uv run flask --app main run --host 0.0.0.0 --port 8080"
+clever env set CC_PYTHON_VERSION 3.13
+clever env set CC_PYTHON_MODULE main:app
 clever deploy
 ```
 
 `POSTGRESQL_ADDON_URI` is provided by the PostgreSQL add-on. The application reads the Keycloak address from `CC_KEYCLOAK_URL`: check with `clever env` that the Keycloak add-on provides it, or set it yourself.
+
+## Deploy with Terraform or OpenTofu
+
+`terraform/main.tf` creates the PostgreSQL database and the Python application (auto-scaling from 1 to 3 instances), and deploys this repository:
+
+```bash
+cd terraform
+terraform init
+terraform apply -var organisation=<orga_or_user_id> -var secret_key="$(openssl rand -hex 32)"
+```
+
+Keycloak still needs the realm and client described above, and the `KEYCLOAK_*` variables on the application.
 
 ## Run locally
 
